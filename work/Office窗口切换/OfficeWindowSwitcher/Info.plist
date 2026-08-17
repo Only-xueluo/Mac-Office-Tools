@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+	<string>Mac Office Tools</string>
+    <key>CFBundleExecutable</key>
+	<string>Mac Office Tools</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.xueluo.office-window-switcher</string>
+    <key>CFBundleName</key>
+	<string>Mac Office Tools</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+	<string>3.11</string>
+    <key>CFBundleVersion</key>
+	<string>32</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>点击文件行中的复制按钮后，Mac Office Tools 会读取该 Office 文档的保存位置，以便将该文件复制到剪贴板。</string>
+	<key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

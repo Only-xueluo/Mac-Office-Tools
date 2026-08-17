@@ -1,0 +1,7 @@
+# macOS metadata
+.DS_Store
+
+# Generated application bundles and build intermediates
+output/
+work/Office窗口切换/build.*/
+work/Office窗口切换/failed-build-app/
