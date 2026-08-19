@@ -500,6 +500,12 @@ private final class GroupHeaderView: NSView {
 }
 
 private final class WindowItemView: NSView {
+    private let officeWindow: OfficeWindow
+    private let highlightView = NSView()
+    private let windowButton: WindowButton
+    private let copyButton: WindowCopyButton
+    private let closeButton: WindowCloseButton
+
     init(
         window: OfficeWindow,
         target: AnyObject,
@@ -507,31 +513,66 @@ private final class WindowItemView: NSView {
         copyAction: Selector,
         closeAction: Selector
     ) {
+        self.officeWindow = window
+        self.windowButton = WindowButton(officeWindow: window, target: target, action: activateAction)
+        self.copyButton = WindowCopyButton(officeWindow: window, target: target, action: copyAction)
+        self.closeButton = WindowCloseButton(officeWindow: window, target: target, action: closeAction)
         super.init(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: 23))
 
-        let button = WindowButton(officeWindow: window, target: target, action: activateAction)
-        button.frame = NSRect(x: 20, y: 0, width: 153, height: 23)
-        addSubview(button)
+        highlightView.frame = NSRect(x: 4, y: 0, width: MenuLayout.width - 8, height: 23)
+        highlightView.wantsLayer = true
+        highlightView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.cgColor
+        highlightView.layer?.cornerRadius = 4
+        highlightView.isHidden = true
+        addSubview(highlightView)
 
-        let copyButton = WindowCopyButton(officeWindow: window, target: target, action: copyAction)
+        windowButton.frame = NSRect(x: 20, y: 0, width: 153, height: 23)
+        addSubview(windowButton)
+
         copyButton.frame = NSRect(x: MenuLayout.trailingControlEdge - 48, y: 1, width: 20, height: 21)
         addSubview(copyButton)
 
-        let closeButton = WindowCloseButton(officeWindow: window, target: target, action: closeAction)
         closeButton.frame = NSRect(x: MenuLayout.trailingControlEdge - 22, y: 1, width: 22, height: 21)
         addSubview(closeButton)
+
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        ))
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    override func mouseEntered(with event: NSEvent) {
+        updateHighlight(isHighlighted: true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        updateHighlight(isHighlighted: false)
+    }
+
+    private func updateHighlight(isHighlighted: Bool) {
+        guard !officeWindow.isFocused else { return }
+        highlightView.isHidden = !isHighlighted
+        windowButton.setHighlighted(isHighlighted)
+        copyButton.setHighlighted(isHighlighted)
+        closeButton.setHighlighted(isHighlighted)
+    }
 }
 
 private final class WindowButton: NSButton {
     let officeWindow: OfficeWindow
+    private let titleFont: NSFont
 
     init(officeWindow: OfficeWindow, target: AnyObject, action: Selector) {
         self.officeWindow = officeWindow
+        self.titleFont = officeWindow.isFocused
+            ? NSFont.menuFont(ofSize: 0)
+            : NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .semibold)
         super.init(frame: .zero)
         title = officeWindow.title
         self.target = target
@@ -539,27 +580,36 @@ private final class WindowButton: NSButton {
         isBordered = false
         alignment = .left
         lineBreakMode = .byTruncatingTail
-        let titleFont = officeWindow.isFocused
-            ? NSFont.menuFont(ofSize: 0)
-            : NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .semibold)
         font = titleFont
         isEnabled = !officeWindow.isFocused
-        attributedTitle = NSAttributedString(
-            string: officeWindow.title,
-            attributes: [
-                .font: titleFont,
-                .foregroundColor: officeWindow.isFocused ? NSColor.secondaryLabelColor : NSColor.labelColor
-            ]
-        )
+        setHighlighted(false)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    func setHighlighted(_ isHighlighted: Bool) {
+        let color: NSColor
+        if officeWindow.isFocused {
+            color = .secondaryLabelColor
+        } else {
+            color = isHighlighted ? .selectedMenuItemTextColor : .labelColor
+        }
+        attributedTitle = NSAttributedString(
+            string: officeWindow.title,
+            attributes: [
+                .font: titleFont,
+                .foregroundColor: color
+            ]
+        )
+    }
 }
 
 private final class WindowCopyButton: NSButton {
     let officeWindow: OfficeWindow
+    private var isRowHighlighted = false
+    private var isPointerInside = false
 
     init(officeWindow: OfficeWindow, target: AnyObject, action: Selector) {
         self.officeWindow = officeWindow
@@ -572,7 +622,7 @@ private final class WindowCopyButton: NSButton {
         image?.isTemplate = true
         imagePosition = .imageOnly
         setAccessibilityLabel("复制 \(officeWindow.title)")
-        contentTintColor = .secondaryLabelColor
+        updateTintColor()
         addTrackingArea(NSTrackingArea(
             rect: .zero,
             options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
@@ -586,16 +636,31 @@ private final class WindowCopyButton: NSButton {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        contentTintColor = .labelColor
+        isPointerInside = true
+        updateTintColor()
     }
 
     override func mouseExited(with event: NSEvent) {
-        contentTintColor = .secondaryLabelColor
+        isPointerInside = false
+        updateTintColor()
+    }
+
+    func setHighlighted(_ isHighlighted: Bool) {
+        isRowHighlighted = isHighlighted
+        updateTintColor()
+    }
+
+    private func updateTintColor() {
+        contentTintColor = isRowHighlighted
+            ? .selectedMenuItemTextColor
+            : (isPointerInside ? .labelColor : .secondaryLabelColor)
     }
 }
 
 private final class WindowCloseButton: NSButton {
     let officeWindow: OfficeWindow
+    private var isRowHighlighted = false
+    private var isPointerInside = false
 
     init(officeWindow: OfficeWindow, target: AnyObject, action: Selector) {
         self.officeWindow = officeWindow
@@ -608,7 +673,7 @@ private final class WindowCloseButton: NSButton {
         image?.isTemplate = true
         imagePosition = .imageOnly
         setAccessibilityLabel("关闭 \(officeWindow.title)")
-        contentTintColor = .secondaryLabelColor
+        updateTintColor()
         addTrackingArea(NSTrackingArea(
             rect: .zero,
             options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
@@ -622,11 +687,24 @@ private final class WindowCloseButton: NSButton {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        contentTintColor = .labelColor
+        isPointerInside = true
+        updateTintColor()
     }
 
     override func mouseExited(with event: NSEvent) {
-        contentTintColor = .secondaryLabelColor
+        isPointerInside = false
+        updateTintColor()
+    }
+
+    func setHighlighted(_ isHighlighted: Bool) {
+        isRowHighlighted = isHighlighted
+        updateTintColor()
+    }
+
+    private func updateTintColor() {
+        contentTintColor = isRowHighlighted
+            ? .selectedMenuItemTextColor
+            : (isPointerInside ? .labelColor : .secondaryLabelColor)
     }
 }
 
