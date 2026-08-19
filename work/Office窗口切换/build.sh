@@ -7,9 +7,9 @@ source_file="$script_dir/OfficeWindowSwitcher/main.swift"
 icon_source="$script_dir/OfficeWindowSwitcher/IconGenerator.swift"
 asset_catalog_source="$script_dir/OfficeWindowSwitcher/Assets.xcassets"
 plist_file="$script_dir/OfficeWindowSwitcher/Info.plist"
-release_dir="$project_root/output/Mac Office Tools/v3.11"
+release_dir="$project_root/output/Mac Office Tools/v3.12"
 app_path="$release_dir/Mac Office Tools.app"
-sdk_path="/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk"
+sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
 actool_path="/Volumes/Applications/Applications/Xcode.app/Contents/Developer/usr/bin/actool"
 
 if [[ -e "$app_path" ]]; then

@@ -539,12 +539,15 @@ private final class WindowButton: NSButton {
         isBordered = false
         alignment = .left
         lineBreakMode = .byTruncatingTail
-        font = NSFont.menuFont(ofSize: 0)
+        let titleFont = officeWindow.isFocused
+            ? NSFont.menuFont(ofSize: 0)
+            : NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .semibold)
+        font = titleFont
         isEnabled = !officeWindow.isFocused
         attributedTitle = NSAttributedString(
             string: officeWindow.title,
             attributes: [
-                .font: NSFont.menuFont(ofSize: 0),
+                .font: titleFont,
                 .foregroundColor: officeWindow.isFocused ? NSColor.secondaryLabelColor : NSColor.labelColor
             ]
         )
