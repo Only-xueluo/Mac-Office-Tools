@@ -2,41 +2,33 @@ import AppKit
 import ApplicationServices
 
 private enum MenuLayout {
-    static let width: CGFloat = 240
-    static let trailingControlEdge: CGFloat = 226
+    static let width: CGFloat = 220
+    static let windowTitleAvailableWidth: CGFloat = 156
+    static let windowTitleEllipsisCenter: CGFloat = 78
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let menu = NSMenu()
-    private let officeApps: [(name: String, bundleIdentifier: String, canCreate: Bool)] = [
-        ("Word", "com.microsoft.Word", true),
-        ("Excel", "com.microsoft.Excel", true),
-        ("PowerPoint", "com.microsoft.Powerpoint", true)
+    private let officeApps: [(name: String, bundleIdentifier: String)] = [
+        ("Word", "com.microsoft.Word"),
+        ("Excel", "com.microsoft.Excel"),
+        ("PowerPoint", "com.microsoft.Powerpoint")
     ]
     private var windowOrder: [String: Int] = [:]
     private var nextWindowOrder = 0
-    private var menuIsVisible = false
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusItem.button?.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Mac Office Tools")
         statusItem.button?.image?.isTemplate = true
         statusItem.menu = menu
+        menu.minimumWidth = MenuLayout.width
         menu.delegate = self
         requestAccessibilityPermissionIfNeeded()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         rebuildMenu()
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        menuIsVisible = true
-    }
-
-    func menuDidClose(_ menu: NSMenu) {
-        menuIsVisible = false
     }
 
     private func rebuildMenu() {
@@ -68,7 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             addWindowGroup(
                 name: officeApp.name,
                 bundleIdentifier: officeApp.bundleIdentifier,
-                canCreate: officeApp.canCreate,
                 windows: orderedWindows(windows)
             )
             hasVisibleGroup = true
@@ -81,6 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        let newItem = NSMenuItem(title: "新建", action: nil, keyEquivalent: "")
+        newItem.submenu = newDocumentMenu()
+        menu.addItem(newItem)
         let refreshItem = menu.addItem(withTitle: "刷新", action: #selector(refresh), keyEquivalent: "r")
         refreshItem.target = self
         let quitItem = menu.addItem(withTitle: "退出", action: #selector(quit), keyEquivalent: "q")
@@ -90,29 +84,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func addWindowGroup(
         name: String,
         bundleIdentifier: String,
-        canCreate: Bool,
         windows: [OfficeWindow]
     ) {
-        let header = NSMenuItem()
-        header.view = GroupHeaderView(
-            name: name,
-            bundleIdentifier: bundleIdentifier,
-            target: canCreate ? self : nil,
-            action: canCreate ? #selector(createNewDocument(_:)) : nil
-        )
-        menu.addItem(header)
+        if #available(macOS 14.0, *) {
+            menu.addItem(.sectionHeader(title: name))
+        } else {
+            let header = NSMenuItem(title: name, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+        }
 
         for window in windows {
-            let item = NSMenuItem()
-            item.view = WindowItemView(
-                window: window,
-                target: self,
-                activateAction: #selector(activateWindow(_:)),
-                copyAction: #selector(copyWindowFile(_:)),
-                closeAction: #selector(closeWindow(_:))
-            )
-            menu.addItem(item)
+            let displayedTitle = displayTitle(for: window.title, bundleIdentifier: bundleIdentifier)
+            let windowItem = NSMenuItem(title: displayedTitle, action: nil, keyEquivalent: "")
+            if window.isFocused {
+                windowItem.attributedTitle = NSAttributedString(
+                    string: displayedTitle,
+                    attributes: [
+                        .font: NSFont.menuFont(ofSize: 0),
+                        .foregroundColor: NSColor.secondaryLabelColor
+                    ]
+                )
+            }
+            windowItem.submenu = windowActionsMenu(for: window)
+            menu.addItem(windowItem)
         }
+    }
+
+    private func newDocumentMenu() -> NSMenu {
+        let newMenu = NSMenu()
+        for officeApp in officeApps {
+            let item = NSMenuItem(title: officeApp.name, action: #selector(createNewDocument(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = officeApp.bundleIdentifier
+            newMenu.addItem(item)
+        }
+        return newMenu
+    }
+
+    private func windowActionsMenu(for window: OfficeWindow) -> NSMenu {
+        let actionsMenu = NSMenu()
+
+        let openItem = NSMenuItem(
+            title: "打开",
+            action: window.isFocused ? nil : #selector(activateWindow(_:)),
+            keyEquivalent: ""
+        )
+        openItem.isEnabled = !window.isFocused
+        if !window.isFocused {
+            openItem.target = self
+            openItem.representedObject = window
+        }
+        openItem.image = NSImage(systemSymbolName: "arrow.up.forward.app", accessibilityDescription: "打开")
+        openItem.image?.isTemplate = true
+        actionsMenu.addItem(openItem)
+
+        let revealItem = NSMenuItem(title: "在 Finder 中显示", action: #selector(revealWindowFile(_:)), keyEquivalent: "")
+        revealItem.target = self
+        revealItem.representedObject = window
+        revealItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: "在 Finder 中显示")
+        revealItem.image?.isTemplate = true
+        actionsMenu.addItem(revealItem)
+
+        let copyItem = NSMenuItem(title: "复制", action: #selector(copyWindowFile(_:)), keyEquivalent: "")
+        copyItem.target = self
+        copyItem.representedObject = window
+        copyItem.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "复制")
+        copyItem.image?.isTemplate = true
+        actionsMenu.addItem(copyItem)
+
+        let closeItem = NSMenuItem(title: "关闭", action: #selector(closeWindow(_:)), keyEquivalent: "")
+        closeItem.target = self
+        closeItem.representedObject = window
+        closeItem.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "关闭")
+        closeItem.image?.isTemplate = true
+        actionsMenu.addItem(closeItem)
+
+        return actionsMenu
     }
 
     private func windows(for application: NSRunningApplication) -> [OfficeWindow] {
@@ -154,6 +202,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return windows.sorted { (windowOrder[$0.orderKey] ?? 0) < (windowOrder[$1.orderKey] ?? 0) }
     }
 
+    private func displayTitle(for title: String, bundleIdentifier: String) -> String {
+        let titleWithoutCompatibilityMode = titleWithoutWordCompatibilityMode(title, bundleIdentifier: bundleIdentifier)
+        let titleForDisplay = (titleWithoutCompatibilityMode as NSString).deletingPathExtension
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.menuFont(ofSize: 0)]
+        let availableWidth = MenuLayout.windowTitleAvailableWidth
+        guard (titleForDisplay as NSString).size(withAttributes: attributes).width > availableWidth else {
+            return titleForDisplay
+        }
+
+        let ellipsis = "…"
+        let ellipsisWidth = (ellipsis as NSString).size(withAttributes: attributes).width
+        let characters = Array(titleForDisplay)
+        var bestTitle: String?
+        var bestWidth: CGFloat = 0
+        var smallestCenterDifference = CGFloat.greatestFiniteMagnitude
+
+        for leadingCount in 1..<characters.count {
+            for trailingCount in 1..<(characters.count - leadingCount) {
+                let leadingTitle = String(characters.prefix(leadingCount))
+                let trailingTitle = String(characters.suffix(trailingCount))
+                let candidate = leadingTitle + ellipsis + trailingTitle
+                let candidateWidth = (candidate as NSString).size(withAttributes: attributes).width
+                guard candidateWidth <= availableWidth else { continue }
+
+                let ellipsisCenter = (leadingTitle as NSString).size(withAttributes: attributes).width + ellipsisWidth / 2
+                let centerDifference = abs(ellipsisCenter - MenuLayout.windowTitleEllipsisCenter)
+                if centerDifference < smallestCenterDifference ||
+                    (centerDifference == smallestCenterDifference && candidateWidth > bestWidth) {
+                    bestTitle = candidate
+                    bestWidth = candidateWidth
+                    smallestCenterDifference = centerDifference
+                }
+            }
+        }
+
+        return bestTitle ?? titleForDisplay
+    }
+
+    private func titleWithoutWordCompatibilityMode(_ title: String, bundleIdentifier: String) -> String {
+        guard bundleIdentifier == "com.microsoft.Word" else { return title }
+
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let compatibilityMode = "兼容性模式"
+        guard trimmedTitle.hasSuffix(compatibilityMode) else { return title }
+
+        let markerStart = trimmedTitle.index(trimmedTitle.endIndex, offsetBy: -compatibilityMode.count)
+        let prefix = trimmedTitle[..<markerStart]
+        let separatorCharacters = CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: "-‐‑‒–—―－\u{00A0}"))
+        guard let finalPrefixScalar = prefix.unicodeScalars.last,
+              separatorCharacters.contains(finalPrefixScalar) else {
+            return title
+        }
+
+        let fileName = String(prefix).trimmingCharacters(in: separatorCharacters)
+        return fileName.isEmpty ? title : fileName
+    }
+
     private func stringAttribute(_ attribute: CFString, from element: AXUIElement) -> String? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
@@ -168,37 +274,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AXIsProcessTrustedWithOptions(options)
     }
 
-    @objc private func activateWindow(_ sender: WindowButton) {
-        let reference = sender.officeWindow
+    @objc private func activateWindow(_ sender: NSMenuItem) {
+        guard let reference = sender.representedObject as? OfficeWindow else { return }
+        bringWindowToFront(reference)
+    }
 
-        menuIsVisible = false
+    private func bringWindowToFront(_ reference: OfficeWindow) {
         if let application = NSRunningApplication(processIdentifier: reference.pid) {
             application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         }
         AXUIElementSetAttributeValue(reference.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
         AXUIElementPerformAction(reference.element, kAXRaiseAction as CFString)
-        refreshMenuAfterWindowSwitch()
     }
 
-    private func refreshMenuAfterWindowSwitch() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            guard let self else { return }
-            self.rebuildMenu()
-            guard let button = self.statusItem.button else { return }
-            self.menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+    @objc private func createNewDocument(_ sender: NSMenuItem) {
+        guard let bundleIdentifier = sender.representedObject as? String else {
+            return
         }
-    }
+        let applicationName = sender.title
 
-    @objc private func createNewDocument(_ sender: NSButton) {
-        guard let bundleIdentifier = sender.identifier?.rawValue,
-              let application = NSWorkspace.shared.runningApplications.first(where: {
-                  $0.bundleIdentifier == bundleIdentifier
-              }) else {
+        if let application = NSWorkspace.shared.runningApplications.first(where: {
+            $0.bundleIdentifier == bundleIdentifier
+        }) {
+            createNewDocument(in: application, after: 0.4)
             return
         }
 
+        guard let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            StatusToast.show(title: "未找到 \(applicationName)", symbolName: "exclamationmark.triangle", isError: true)
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: applicationURL, configuration: configuration) { [weak self] application, _ in
+            DispatchQueue.main.async {
+                guard let application else {
+                    StatusToast.show(title: "未能启动 \(applicationName)", symbolName: "exclamationmark.triangle", isError: true)
+                    return
+                }
+                self?.createNewDocument(in: application, after: 1.0)
+            }
+        }
+    }
+
+    private func createNewDocument(in application: NSRunningApplication, after delay: TimeInterval) {
         application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             let source = CGEventSource(stateID: .hidSystemState)
             let keyCode = CGKeyCode(45) // N
             let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
@@ -208,13 +330,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             keyDown?.postToPid(application.processIdentifier)
             keyUp?.postToPid(application.processIdentifier)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.3) { [weak self] in
             self?.rebuildMenu()
         }
     }
 
-    @objc private func closeWindow(_ sender: WindowCloseButton) {
-        let reference = sender.officeWindow
+    @objc private func closeWindow(_ sender: NSMenuItem) {
+        guard let reference = sender.representedObject as? OfficeWindow else { return }
         if let application = NSRunningApplication(processIdentifier: reference.pid) {
             application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         }
@@ -231,20 +353,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rebuildMenu()
     }
 
-    @objc private func copyWindowFile(_ sender: WindowCopyButton) {
-        let reference = sender.officeWindow
+    @objc private func copyWindowFile(_ sender: NSMenuItem) {
+        guard let reference = sender.representedObject as? OfficeWindow else { return }
         if let fileURL = accessibleFileURL(for: reference.element) {
             copyToPasteboard(fileURL)
             return
         }
 
-        if let application = NSRunningApplication(processIdentifier: reference.pid) {
-            application.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        }
-        AXUIElementSetAttributeValue(reference.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-        AXUIElementPerformAction(reference.element, kAXRaiseAction as CFString)
+        bringWindowToFront(reference)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             self?.copyActiveDocument()
+        }
+    }
+
+    @objc private func revealWindowFile(_ sender: NSMenuItem) {
+        guard let reference = sender.representedObject as? OfficeWindow else { return }
+        if let fileURL = accessibleFileURL(for: reference.element) {
+            revealInFinder(fileURL)
+            return
+        }
+
+        bringWindowToFront(reference)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.revealActiveDocument()
         }
     }
 
@@ -252,8 +383,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let application = NSWorkspace.shared.frontmostApplication else { return }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let fileURL = self.activeDocumentURL(for: application) else { return }
+            guard let fileURL = self.activeDocumentURL(for: application, unsavedMessage: "请保存后再复制") else { return }
             self.copyToPasteboard(fileURL)
+        }
+    }
+
+    private func revealActiveDocument() {
+        guard let application = NSWorkspace.shared.frontmostApplication else { return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let fileURL = self.activeDocumentURL(for: application, unsavedMessage: "请先保存该文件") else { return }
+            self.revealInFinder(fileURL)
         }
     }
 
@@ -269,7 +409,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func activeDocumentURL(for application: NSRunningApplication) -> URL? {
+    private func revealInFinder(_ fileURL: URL) {
+        DispatchQueue.main.async {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        }
+    }
+
+    private func activeDocumentURL(for application: NSRunningApplication, unsavedMessage: String) -> URL? {
         switch application.bundleIdentifier {
         case "com.microsoft.Excel":
             return officeDocumentURL(
@@ -279,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 end tell
                 return documentPath
                 """,
-                unsavedMessage: "请保存后再复制"
+                unsavedMessage: unsavedMessage
             )
         case "com.microsoft.Word":
             return officeDocumentURL(
@@ -289,7 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 end tell
                 return documentPath
                 """,
-                unsavedMessage: "请保存后再复制"
+                unsavedMessage: unsavedMessage
             )
         case "com.microsoft.Powerpoint":
             return officeDocumentURL(
@@ -299,7 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 end tell
                 return documentPath
                 """,
-                unsavedMessage: "请保存后再复制"
+                unsavedMessage: unsavedMessage
             )
         default:
             return nil
@@ -440,271 +586,6 @@ private final class OfficeWindow: NSObject {
         self.element = element
         self.title = title
         self.isFocused = isFocused
-    }
-}
-
-private final class GroupHeaderView: NSView {
-    private var newButton: NSButton?
-
-    init(name: String, bundleIdentifier: String, target: AnyObject?, action: Selector?) {
-        super.init(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: 25))
-
-        let nameLabel = NSTextField(labelWithString: name)
-        nameLabel.frame = NSRect(x: 14, y: 4, width: 123, height: 17)
-        nameLabel.font = NSFont.menuFont(ofSize: 0)
-        nameLabel.textColor = .secondaryLabelColor
-        addSubview(nameLabel)
-
-        if let target, let action {
-            let newButton = NSButton(title: "+新建", target: target, action: action)
-            newButton.frame = NSRect(x: MenuLayout.trailingControlEdge - 70, y: 2, width: 70, height: 21)
-            newButton.isBordered = false
-            newButton.font = NSFont.menuFont(ofSize: 0)
-            newButton.alignment = .right
-            newButton.identifier = NSUserInterfaceItemIdentifier(bundleIdentifier)
-            addSubview(newButton)
-            self.newButton = newButton
-            updateNewButtonColor(isHovered: false)
-        }
-
-        addTrackingArea(NSTrackingArea(
-            rect: bounds,
-            options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved],
-            owner: self,
-            userInfo: nil
-        ))
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        guard let newButton else { return }
-        updateNewButtonColor(isHovered: newButton.frame.contains(convert(event.locationInWindow, from: nil)))
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        updateNewButtonColor(isHovered: false)
-    }
-
-    private func updateNewButtonColor(isHovered: Bool) {
-        newButton?.attributedTitle = NSAttributedString(
-            string: "+新建",
-            attributes: [
-                .font: NSFont.menuFont(ofSize: 0),
-                .foregroundColor: isHovered ? NSColor.labelColor : NSColor.secondaryLabelColor
-            ]
-        )
-    }
-}
-
-private final class WindowItemView: NSView {
-    private let officeWindow: OfficeWindow
-    private let highlightView = NSView()
-    private let windowButton: WindowButton
-    private let copyButton: WindowCopyButton
-    private let closeButton: WindowCloseButton
-
-    init(
-        window: OfficeWindow,
-        target: AnyObject,
-        activateAction: Selector,
-        copyAction: Selector,
-        closeAction: Selector
-    ) {
-        self.officeWindow = window
-        self.windowButton = WindowButton(officeWindow: window, target: target, action: activateAction)
-        self.copyButton = WindowCopyButton(officeWindow: window, target: target, action: copyAction)
-        self.closeButton = WindowCloseButton(officeWindow: window, target: target, action: closeAction)
-        super.init(frame: NSRect(x: 0, y: 0, width: MenuLayout.width, height: 23))
-
-        highlightView.frame = NSRect(x: 4, y: 0, width: MenuLayout.width - 8, height: 23)
-        highlightView.wantsLayer = true
-        highlightView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.cgColor
-        highlightView.layer?.cornerRadius = 4
-        highlightView.isHidden = true
-        addSubview(highlightView)
-
-        windowButton.frame = NSRect(x: 20, y: 0, width: 153, height: 23)
-        addSubview(windowButton)
-
-        copyButton.frame = NSRect(x: MenuLayout.trailingControlEdge - 48, y: 1, width: 20, height: 21)
-        addSubview(copyButton)
-
-        closeButton.frame = NSRect(x: MenuLayout.trailingControlEdge - 22, y: 1, width: 22, height: 21)
-        addSubview(closeButton)
-
-        addTrackingArea(NSTrackingArea(
-            rect: .zero,
-            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
-            owner: self,
-            userInfo: nil
-        ))
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        updateHighlight(isHighlighted: true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        updateHighlight(isHighlighted: false)
-    }
-
-    private func updateHighlight(isHighlighted: Bool) {
-        guard !officeWindow.isFocused else { return }
-        highlightView.isHidden = !isHighlighted
-        windowButton.setHighlighted(isHighlighted)
-        copyButton.setHighlighted(isHighlighted)
-        closeButton.setHighlighted(isHighlighted)
-    }
-}
-
-private final class WindowButton: NSButton {
-    let officeWindow: OfficeWindow
-    private let titleFont: NSFont
-
-    init(officeWindow: OfficeWindow, target: AnyObject, action: Selector) {
-        self.officeWindow = officeWindow
-        self.titleFont = officeWindow.isFocused
-            ? NSFont.menuFont(ofSize: 0)
-            : NSFont.systemFont(ofSize: NSFont.menuFont(ofSize: 0).pointSize, weight: .semibold)
-        super.init(frame: .zero)
-        title = officeWindow.title
-        self.target = target
-        self.action = action
-        isBordered = false
-        alignment = .left
-        lineBreakMode = .byTruncatingTail
-        font = titleFont
-        isEnabled = !officeWindow.isFocused
-        setHighlighted(false)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func setHighlighted(_ isHighlighted: Bool) {
-        let color: NSColor
-        if officeWindow.isFocused {
-            color = .secondaryLabelColor
-        } else {
-            color = isHighlighted ? .selectedMenuItemTextColor : .labelColor
-        }
-        attributedTitle = NSAttributedString(
-            string: officeWindow.title,
-            attributes: [
-                .font: titleFont,
-                .foregroundColor: color
-            ]
-        )
-    }
-}
-
-private final class WindowCopyButton: NSButton {
-    let officeWindow: OfficeWindow
-    private var isRowHighlighted = false
-    private var isPointerInside = false
-
-    init(officeWindow: OfficeWindow, target: AnyObject, action: Selector) {
-        self.officeWindow = officeWindow
-        super.init(frame: .zero)
-        self.target = target
-        self.action = action
-        isBordered = false
-        image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .regular))
-        image?.isTemplate = true
-        imagePosition = .imageOnly
-        setAccessibilityLabel("复制 \(officeWindow.title)")
-        updateTintColor()
-        addTrackingArea(NSTrackingArea(
-            rect: .zero,
-            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
-            owner: self,
-            userInfo: nil
-        ))
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isPointerInside = true
-        updateTintColor()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isPointerInside = false
-        updateTintColor()
-    }
-
-    func setHighlighted(_ isHighlighted: Bool) {
-        isRowHighlighted = isHighlighted
-        updateTintColor()
-    }
-
-    private func updateTintColor() {
-        contentTintColor = isRowHighlighted
-            ? .selectedMenuItemTextColor
-            : (isPointerInside ? .labelColor : .secondaryLabelColor)
-    }
-}
-
-private final class WindowCloseButton: NSButton {
-    let officeWindow: OfficeWindow
-    private var isRowHighlighted = false
-    private var isPointerInside = false
-
-    init(officeWindow: OfficeWindow, target: AnyObject, action: Selector) {
-        self.officeWindow = officeWindow
-        super.init(frame: .zero)
-        self.target = target
-        self.action = action
-        isBordered = false
-        image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
-        image?.isTemplate = true
-        imagePosition = .imageOnly
-        setAccessibilityLabel("关闭 \(officeWindow.title)")
-        updateTintColor()
-        addTrackingArea(NSTrackingArea(
-            rect: .zero,
-            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
-            owner: self,
-            userInfo: nil
-        ))
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isPointerInside = true
-        updateTintColor()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isPointerInside = false
-        updateTintColor()
-    }
-
-    func setHighlighted(_ isHighlighted: Bool) {
-        isRowHighlighted = isHighlighted
-        updateTintColor()
-    }
-
-    private func updateTintColor() {
-        contentTintColor = isRowHighlighted
-            ? .selectedMenuItemTextColor
-            : (isPointerInside ? .labelColor : .secondaryLabelColor)
     }
 }
 
